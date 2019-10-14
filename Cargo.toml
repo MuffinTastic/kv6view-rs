@@ -1,0 +1,10 @@
+[package]
+name = "kv6view-rs"
+version = "0.1.0"
+authors = ["MuffinTastic <muffintastic32@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+clap = "2.33.0"
+glium = "0.26.0-alpha3"
+cgmath = "0.17.0"
