@@ -20,21 +20,13 @@ mod camera;
 mod shaders;
 mod kv6;
 
-use camera::Camera;
-
-#[derive(Debug, Copy, Clone)]
-struct Vertex {
-    position: [f32; 3]
-}
-implement_vertex!(Vertex, position);
-
 const WINDOW_WIDTH: u32 = 640;
 const WINDOW_HEIGHT: u32 = 480;
 
 struct Viewer {
     focused: bool,
 
-    camera: Camera,
+    camera: camera::Camera,
     
     program: glium::Program,
 
@@ -49,6 +41,15 @@ struct Viewer {
 fn set_capture(display: &Display, capture: bool) {
     display.gl_window().window().set_cursor_grab(capture).unwrap();
     display.gl_window().window().set_cursor_visible(!capture);
+}
+
+fn center_window(display: &Display) {
+    let monitor_size = display.gl_window().window().current_monitor().size();
+    let outer_size = display.gl_window().window().outer_size();
+    display.gl_window().window().set_outer_position(glutin::dpi::LogicalPosition {
+        x: (monitor_size.width / 2.0) - (outer_size.width / 2.0),
+        y: (monitor_size.height / 2.0) - (outer_size.height / 2.0)
+    });
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -68,10 +69,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new();
     let wb = glutin::window::WindowBuilder::new()
         .with_inner_size((WINDOW_WIDTH, WINDOW_HEIGHT).into())
-        .with_title("KV6View");
+        .with_title("KV6View")
+        .with_visible(false);
     let cb = glutin::ContextBuilder::new();
     let display = glium::Display::new(wb, cb, &event_loop).expect("Error creating display");
 
+    center_window(&display);
+    display.gl_window().window().set_visible(true);
+    
     set_capture(&display, true);
 
     let viewer = init_data(matches, &display)?;
@@ -80,7 +85,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn init_data(matches: ArgMatches, display: &Display) -> Result<Viewer, Box<dyn std::error::Error>> {
-    let camera = Camera::new(
+    let camera = camera::Camera::new(
         Vector3::new(0.0, 32.0, 0.0),
         Vector3::new(0.0, -1.0, 0.0).normalize()
     );
@@ -119,7 +124,7 @@ fn init_data(matches: ArgMatches, display: &Display) -> Result<Viewer, Box<dyn s
 }
 
 fn run_loop(mut viewer: Viewer, event_loop: EventLoop<()>, display: Display) {
-    let MS_PER_UPDATE = Duration::new(1, 0).div_f64(60.0); // can't make const Durations in rust?
+    let ms_per_update = Duration::new(1, 0).div_f64(60.0); // can't make const Durations in rust?
 
     let mut prev_time = Instant::now();
     let mut lag = Duration::new(0, 0);
@@ -137,10 +142,10 @@ fn run_loop(mut viewer: Viewer, event_loop: EventLoop<()>, display: Display) {
             handle_event(&mut viewer, event, &display, &mut action);
         }
 
-        while lag >= MS_PER_UPDATE {
+        while lag >= ms_per_update {
             update(&mut viewer);
 
-            lag -= MS_PER_UPDATE;
+            lag -= ms_per_update;
             ticks += 1;
             if ticks >= 60 {
                 ticks = 0;
@@ -150,7 +155,7 @@ fn run_loop(mut viewer: Viewer, event_loop: EventLoop<()>, display: Display) {
 
         frames += 1;
 
-        render(&mut viewer, &display, lag.div_duration_f32(MS_PER_UPDATE));
+        render(&mut viewer, &display, lag.div_duration_f32(ms_per_update));
 
         return action;
     });
@@ -208,7 +213,7 @@ fn render(viewer: &mut Viewer, display: &Display, delta: f32) {
         .. Default::default()
     };
 
-    let perspective: [[f32; 4]; 4] = Camera::get_perspective_matrix(&target).into();
+    let perspective: [[f32; 4]; 4] = camera::Camera::get_perspective_matrix(&target).into();
     let view: [[f32; 4]; 4] = viewer.camera.get_view_matrix(delta).into();
     let model: [[f32; 4]; 4] = Matrix4::from_value(1.0).into(); // identity
     let light_dir: [f32; 3] = viewer.light_dir.into();

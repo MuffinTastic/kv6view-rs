@@ -1,4 +1,5 @@
 /target
 **/*.rs.bk
 *.kv6
+*.kva
 !kv6/light.kv6

@@ -1,6 +1,5 @@
 use cgmath::prelude::*;
 use cgmath::Vector3;
-use cgmath::Vector4;
 use cgmath::Matrix3;
 use cgmath::Matrix4;
 
@@ -147,8 +146,7 @@ mod legacy {
     use cgmath::Vector3;
     use cgmath::Matrix3;
 
-    pub fn orthorotate(rot: Vector3<f32>) -> Matrix3<f32>
-    {
+    pub fn orthorotate(rot: Vector3<f32>) -> Matrix3<f32> {
         let c = Vector3::new(rot.x.cos(), rot.y.cos(), rot.z.cos());
         let s = Vector3::new(rot.x.sin(), rot.y.sin(), rot.z.sin());
 
