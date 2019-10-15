@@ -3,3 +3,5 @@
 *.kv6
 *.kva
 !kv6/light.kv6
+!kv6/caco.kv6
+!kv6/desklamp.kv6
