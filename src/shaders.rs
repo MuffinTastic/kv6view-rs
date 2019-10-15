@@ -8,6 +8,7 @@ pub const VERTEX_SHADER_SRC: &'static str = r#"
 
     uniform mat4 perspective;
     uniform mat4 view;
+    uniform mat4 model;
 
     out vec3 frag_position;
     out vec3 frag_normal;
@@ -15,8 +16,8 @@ pub const VERTEX_SHADER_SRC: &'static str = r#"
     out vec3 frag_color;
 
     void main() {
-        gl_Position = perspective * view * vec4(position, 1.0);
-        frag_position = position;
+        gl_Position = perspective * view * model * vec4(position, 1.0);
+        frag_position = vec3(model * vec4(position, 1.0));
         frag_normal = normal;
         frag_face = face;
         frag_color = color;
@@ -42,9 +43,10 @@ pub const FRAGMENT_SHADER_SRC: &'static str = r#"
         vec3 ambient = ambient_strength * vec3(1.0);
 
         vec3 voxel_norm = normalize(frag_normal);
+        vec3 light_norm = normalize(light_dir);
 
-        float voxel_diff = max(dot(voxel_norm, light_dir) * 0.5 + 0.5, 0.0);
-        float face_diff = max(dot(frag_face, light_dir) * 0.6 + 0.45, 0.0);
+        float voxel_diff = max(dot(voxel_norm, light_norm) * 0.5 + 0.5, 0.0);
+        float face_diff = max(dot(frag_face, light_norm) * 0.6 + 0.45, 0.0);
         vec3 diffuse = (voxel_diff * 0.75 + face_diff * 0.15) * vec3(1.0);
 
         vec3 result = (ambient + diffuse) * (frag_color / 255.0);

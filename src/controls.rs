@@ -10,4 +10,5 @@ pub const KEY_RIGHT: VirtualKeyCode = VirtualKeyCode::D;
 pub const KEY_UP: VirtualKeyCode = VirtualKeyCode::Space;
 pub const KEY_DOWN: VirtualKeyCode = VirtualKeyCode::LControl;
 pub const KEY_BOOST: VirtualKeyCode = VirtualKeyCode::LShift;
-pub const KEY_LIGHT: VirtualKeyCode = VirtualKeyCode::L;
+pub const KEY_MOVE_LIGHT: VirtualKeyCode = VirtualKeyCode::L;
+pub const KEY_SHOW_LIGHT: VirtualKeyCode = VirtualKeyCode::K;

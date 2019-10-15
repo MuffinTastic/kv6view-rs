@@ -1,18 +1,17 @@
 use glium;
 
-pub mod legacy {
+mod legacy {
     use std::io;
     use std::io::Read;
     use std::io::Seek;
     use std::io::SeekFrom;
-    use std::mem;
-    use std::slice;
     use std::fs::File;
+    use zerocopy::{FromBytes, AsBytes};
 
     use cgmath::Vector3;
 
     #[repr(C, packed)]
-    #[derive(Debug)]
+    #[derive(Debug, FromBytes, AsBytes, Default)]
     pub struct RawRGBA {
         pub b: u8,
         pub g: u8,
@@ -21,7 +20,7 @@ pub mod legacy {
     }
 
     #[repr(C, packed)]
-    #[derive(Debug)]
+    #[derive(Debug, FromBytes, AsBytes, Default)]
     pub struct RawVOXType {
         pub color: RawRGBA,
         pub z: u16,
@@ -30,7 +29,7 @@ pub mod legacy {
     }
 
     #[repr(C, packed)]
-    #[derive(Debug)]
+    #[derive(Debug, FromBytes, AsBytes, Default)]
     struct RawKV6Data {
         x_size: u32,
         y_size: u32,
@@ -56,69 +55,30 @@ pub mod legacy {
         pub xy_entries: Vec<u16>
     }
 
-    // this function is what happens when you become very lazy, if i ever become un-lazy i'll redo this whole source file
     pub fn load_kv6(path: &str) -> Result<KV6Data, io::Error> {
         let mut file = File::open(path)?;
         file.seek(SeekFrom::Start(4))?;
 
-        let mut raw_data: RawKV6Data = unsafe { mem::zeroed() };
-        let raw_size = mem::size_of::<RawKV6Data>();
+        let mut raw_data = RawKV6Data::default();
+        file.read_exact(raw_data.as_bytes_mut())?;
 
-        unsafe {
-            let raw_slice = slice::from_raw_parts_mut(
-                &mut raw_data as *mut _ as *mut u8,
-                raw_size
-            );
+        let vox = (0..raw_data.voxel_count).map(|_| {
+            let mut voxel = RawVOXType::default();
+            file.read_exact(voxel.as_bytes_mut())?;
+            Ok(voxel)
+        }).collect::<Result<Vec<RawVOXType>, io::Error>>()?;
 
-            file.read_exact(raw_slice)?;
-        }
+        let x_entries = (0..raw_data.x_size).map(|_| {
+            let mut entry = u32::default();
+            file.read_exact(entry.as_bytes_mut())?;
+            Ok(entry)
+        }).collect::<Result<Vec<u32>, io::Error>>()?;
 
-        let mut vox = Vec::with_capacity(raw_data.voxel_count as usize);
-        for _ in 0..raw_data.voxel_count {
-            let mut raw_data: RawVOXType = unsafe { mem::zeroed() };
-            let raw_size = mem::size_of::<RawVOXType>();
-            unsafe {
-                let raw_slice = slice::from_raw_parts_mut(
-                    &mut raw_data as *mut _ as *mut u8,
-                    raw_size
-                );
-
-                file.read_exact(raw_slice)?;
-            }
-            vox.push(raw_data);
-        }
-
-        let mut x_entries = Vec::with_capacity(raw_data.x_size as usize);
-        for _ in 0..raw_data.x_size {
-            let mut raw_data: u32 = unsafe { mem::zeroed() };
-            let raw_size = mem::size_of::<u32>();
-
-            unsafe {
-                let raw_slice = slice::from_raw_parts_mut(
-                    &mut raw_data as *mut _ as *mut u8,
-                    raw_size
-                );
-
-                file.read_exact(raw_slice)?;
-            }
-            x_entries.push(raw_data);
-        }
-
-        let mut xy_entries = Vec::with_capacity(raw_data.x_size as usize * raw_data.y_size as usize);
-        for _ in 0..raw_data.x_size * raw_data.y_size {
-            let mut raw_data: u16 = unsafe { mem::zeroed() };
-            let raw_size = mem::size_of::<u16>();
-
-            unsafe {
-                let raw_slice = slice::from_raw_parts_mut(
-                    &mut raw_data as *mut _ as *mut u8,
-                    raw_size
-                );
-
-                file.read_exact(raw_slice)?;
-            }
-            xy_entries.push(raw_data);
-        }
+        let xy_entries = (0..raw_data.x_size*raw_data.y_size).map(|_| {
+            let mut entry = u16::default();
+            file.read_exact(entry.as_bytes_mut())?;
+            Ok(entry)
+        }).collect::<Result<Vec<u16>, io::Error>>()?;
 
         Ok(KV6Data {
             x_size: raw_data.x_size,
@@ -157,7 +117,7 @@ pub mod legacy {
         table
     }
 
-    #[derive(Debug, Copy, Clone)]
+    #[derive(Debug, Copy, Clone, Default)]
     pub struct KV6Vertex {
         position: [f32; 3],
         normal: [f32; 3],
@@ -177,79 +137,91 @@ pub mod legacy {
         let mut vertices = Vec::new();
         let normal_table = create_normal_table();
 
-        let mut i = 0;
+        let mut vox_index = 0;
         for x in 0..data.x_size {
             for y in 0..data.y_size {
                 for _ in 0..data.xy_entries[x as usize * data.y_size as usize + y as usize] {
-                    let point = &data.vox[i];
-                    let z = point.z;
-                    let gl = Vector3::new(
+                    let voxel = &data.vox[vox_index];
+                    let z = voxel.z;
+
+                    let vox_pos = Vector3::new(
                         x as f32 - data.x_piv,
-                        y as f32 - data.y_piv,
-                        -(z as f32) - data.z_piv
+                        y as f32 - data.y_piv,   // set center of the model to the pivot
+                        -(z as f32) - data.z_piv // and flip model voxels for compatibility with worldspace
                     );
-                    let normal = normal_table[point.normal_index as usize];
-                    let mut vertex = KV6Vertex {
-                        position: [0.0, 0.0, 0.0],
-                        normal: normal.into(),
-                        face: [0.0, 0.0, 0.0],
-                        color: [point.color.r, point.color.g, point.color.b]
+
+                    // TODO: find a way to simplify/automate this process more by generating vertices?
+
+                    let mut emit_face = |face: [f32; 3], v1: Vector3<f32>, v2: Vector3<f32>, v3: Vector3<f32>, v4: Vector3<f32>| {
+                        let mut vertex = KV6Vertex {
+                            normal: normal_table[voxel.normal_index as usize].into(),
+                            color: [voxel.color.r, voxel.color.g, voxel.color.b],
+                            face,
+                            .. Default::default()
+                        };
+                        vertex.position = (vox_pos + v1).into(); vertices.push(vertex);
+                        vertex.position = (vox_pos + v2).into(); vertices.push(vertex);
+                        vertex.position = (vox_pos + v3).into(); vertices.push(vertex);
+                        vertex.position = (vox_pos + v3).into(); vertices.push(vertex);
+                        vertex.position = (vox_pos + v4).into(); vertices.push(vertex);
+                        vertex.position = (vox_pos + v1).into(); vertices.push(vertex);
                     };
-                    if point.visibility & FRONT_VISIBLE > 0 {
-                        vertex.face = [0.0, 1.0, 0.0];
-                        vertex.position = (gl + Vector3::new(-0.5, 0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5, 0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, 0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, 0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, 0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5, 0.5, -0.5)).into(); vertices.push(vertex);
+
+                    if voxel.visibility & FRONT_VISIBLE > 0 {
+                        emit_face( [0.0, 1.0, 0.0],
+                            Vector3::new(-0.5, 0.5, -0.5),
+                            Vector3::new(-0.5, 0.5,  0.5),
+                            Vector3::new( 0.5, 0.5,  0.5),
+                            Vector3::new( 0.5, 0.5, -0.5)
+                        );
                     }
-                    if point.visibility & BACK_VISIBLE > 0 {
-                        vertex.face = [0.0, -1.0, 0.0];
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, -0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, -0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, -0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5, -0.5)).into(); vertices.push(vertex);
+
+                    if voxel.visibility & BACK_VISIBLE > 0 {
+                        emit_face( [0.0, -1.0, 0.0],
+                            Vector3::new(-0.5, -0.5, -0.5),
+                            Vector3::new( 0.5, -0.5, -0.5),
+                            Vector3::new( 0.5, -0.5,  0.5),
+                            Vector3::new(-0.5, -0.5,  0.5)
+                        );
                     }
-                    if point.visibility & TOP_VISIBLE > 0 {
-                        vertex.face = [0.0, 0.0, 1.0];
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, -0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5,  0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5,  0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5,  0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5,  0.5)).into(); vertices.push(vertex);
+
+                    if voxel.visibility & TOP_VISIBLE > 0 {
+                        emit_face( [0.0, 0.0, 1.0],
+                            Vector3::new(-0.5, -0.5,  0.5),
+                            Vector3::new( 0.5, -0.5,  0.5),
+                            Vector3::new( 0.5,  0.5,  0.5),
+                            Vector3::new(-0.5,  0.5,  0.5)
+                        );
                     }
-                    if point.visibility & BOTTOM_VISIBLE > 0 {
-                        vertex.face = [0.0, 0.0, -1.0];
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5,  0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5,  0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5,  0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, -0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5, -0.5)).into(); vertices.push(vertex);
+
+                    if voxel.visibility & BOTTOM_VISIBLE > 0 {
+                        emit_face( [0.0, 0.0, -1.0],
+                            Vector3::new(-0.5, -0.5, -0.5),
+                            Vector3::new(-0.5,  0.5, -0.5),
+                            Vector3::new( 0.5,  0.5, -0.5),
+                            Vector3::new( 0.5, -0.5, -0.5)
+                        );
                     }
-                    if point.visibility & RIGHT_VISIBLE > 0 {
-                        vertex.face = [1.0, 0.0, 0.0];
-                        vertex.position = (gl + Vector3::new( 0.5, -0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5,  0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5,  0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5,  0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, -0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new( 0.5, -0.5, -0.5)).into(); vertices.push(vertex);
+
+                    if voxel.visibility & RIGHT_VISIBLE > 0 {
+                        emit_face( [1.0, 0.0, 0.0],
+                            Vector3::new( 0.5, -0.5, -0.5),
+                            Vector3::new( 0.5,  0.5, -0.5),
+                            Vector3::new( 0.5,  0.5,  0.5),
+                            Vector3::new( 0.5, -0.5,  0.5)
+                        );
                     }
-                    if point.visibility & LEFT_VISIBLE > 0 {
-                        vertex.face = [-1.0, 0.0, 0.0];
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5,  0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5,  0.5,  0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5,  0.5, -0.5)).into(); vertices.push(vertex);
-                        vertex.position = (gl + Vector3::new(-0.5, -0.5, -0.5)).into(); vertices.push(vertex);
+
+                    if voxel.visibility & LEFT_VISIBLE > 0 {
+                        emit_face( [-1.0, 0.0, 0.0],
+                            Vector3::new(-0.5, -0.5, -0.5),
+                            Vector3::new(-0.5, -0.5,  0.5),
+                            Vector3::new(-0.5,  0.5,  0.5),
+                            Vector3::new(-0.5,  0.5, -0.5)
+                        );
                     }
-                    i += 1;
+
+                    vox_index += 1;
                 }
             }
         }

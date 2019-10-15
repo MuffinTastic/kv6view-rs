@@ -12,6 +12,7 @@ use glium::{Display, Surface};
 
 use cgmath::prelude::*;
 use cgmath::Vector3;
+use cgmath::Matrix4;
 
 mod eventutil;
 mod controls;
@@ -34,10 +35,12 @@ struct Viewer {
     focused: bool,
 
     camera: Camera,
+    
+    program: glium::Program,
     light_dir: Vector3<f32>,
-
-    model: kv6::KV6Model,
-    program: glium::Program
+    light_kv6: kv6::KV6Model,
+    show_light: bool,
+    user_kv6: kv6::KV6Model
 }
 
 fn set_capture(display: &Display, capture: bool) {
@@ -70,26 +73,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 impl Viewer {
     fn init_data(matches: ArgMatches, display: &Display) -> Result<Viewer, Box<dyn std::error::Error>> {
-        let model = kv6::KV6Model::from_file(matches.value_of("file").unwrap(), display)?;
-        
         let camera = Camera::new(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(0.0, 1.0, 0.0)
+            Vector3::new(32.0, 32.0, 0.0),
+            Vector3::new(-1.0, -1.0, 0.0).normalize()
         );
 
         let program = glium::Program::from_source(display,
             &shaders::VERTEX_SHADER_SRC,
             &shaders::FRAGMENT_SHADER_SRC,
-            None).unwrap();
+            None)?;
+
+        let light_kv6 = kv6::KV6Model::from_file("kv6/light.kv6", display)?;
+        let user_kv6 = kv6::KV6Model::from_file(matches.value_of("file").unwrap(), display)?;
 
         Ok(Viewer {
             focused: true,
 
             camera,
-            light_dir: Vector3::new(1.0, 1.0, 1.0).normalize(),
 
-            model,
-            program
+            program,
+            light_dir: (Vector3::new(0.0, 0.0, 0.0) - Vector3::new(-128.0, -128.0, 64.0)).normalize(),
+            light_kv6,
+            show_light: true,
+            user_kv6
         })
     }
 }
@@ -124,7 +130,8 @@ fn run_loop(mut viewer: Viewer, event_loop: EventLoop<()>, display: Display) {
                         let pressed = input.state == ElementState::Pressed;
                         match input.virtual_keycode {
                             Some(controls::KEY_EXIT) => if pressed { action = eventutil::LoopAction::Stop; },
-                            Some(controls::KEY_LIGHT) => if pressed { viewer.light_dir = -viewer.camera.forward; },
+                            Some(controls::KEY_MOVE_LIGHT) => if pressed { viewer.light_dir = -viewer.camera.forward; },
+                            Some(controls::KEY_SHOW_LIGHT) => if pressed { viewer.show_light = !viewer.show_light; },
                             _ => (),
                         }
                     },
@@ -169,24 +176,33 @@ fn render(viewer: &mut Viewer, display: &Display, delta: f32) {
 
     target.clear_color_and_depth((0.05, 0.05, 0.05, 1.0), 1.0);
 
-    let perspective: [[f32; 4]; 4] = Camera::get_perspective_matrix(&target).into();
-    let view: [[f32; 4]; 4] = viewer.camera.get_view_matrix(delta).into();
-
-    let light_dir: [f32; 3] = viewer.light_dir.into();
-
     let params = glium::DrawParameters {
         depth: glium::draw_parameters::Depth {
             test: glium::DepthTest::IfLess,
             write: true,
             .. Default::default()
         },
-        backface_culling: glium::draw_parameters::BackfaceCullingMode::CullingDisabled,
+        backface_culling: glium::draw_parameters::BackfaceCullingMode::CullClockwise,
         .. Default::default()
     };
 
-    target.draw(&viewer.model.vertex_buffer, &viewer.model.indices, &viewer.program,
-        &uniform! { perspective: perspective, view: view, light_dir: light_dir },
+    let perspective: [[f32; 4]; 4] = Camera::get_perspective_matrix(&target).into();
+    let view: [[f32; 4]; 4] = viewer.camera.get_view_matrix(delta).into();
+    let model: [[f32; 4]; 4] = Matrix4::from_value(1.0).into(); // identity
+    let light_dir: [f32; 3] = viewer.light_dir.into();
+
+    target.draw(&viewer.user_kv6.vertex_buffer, &viewer.user_kv6.indices, &viewer.program,
+        &uniform! { perspective: perspective, view: view, model: model, light_dir: light_dir },
         &params).unwrap();
+
+    if viewer.show_light {
+        let model: [[f32; 4]; 4] = Matrix4::from_translation(-viewer.light_dir * 128.0).into();
+        let light_dir: [f32; 3] = (-viewer.light_dir).into(); // so that it's lit on the side facing the user's kv6
+
+        target.draw(&viewer.light_kv6.vertex_buffer, &viewer.light_kv6.indices, &viewer.program,
+            &uniform! { perspective: perspective, view: view, model: model, light_dir: light_dir },
+            &params).unwrap();
+    }
 
     target.finish().unwrap();
 }
