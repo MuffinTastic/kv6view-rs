@@ -11,7 +11,7 @@ mod legacy {
     use cgmath::Vector3;
 
     #[repr(C, packed)]
-    #[derive(Debug, FromBytes, AsBytes, Default)]
+    #[derive(FromBytes, AsBytes, Default)]
     pub struct RawRGBA {
         pub b: u8,
         pub g: u8,
@@ -20,7 +20,7 @@ mod legacy {
     }
 
     #[repr(C, packed)]
-    #[derive(Debug, FromBytes, AsBytes, Default)]
+    #[derive(FromBytes, AsBytes, Default)]
     pub struct RawVOXType {
         pub color: RawRGBA,
         pub z: u16,
@@ -29,7 +29,7 @@ mod legacy {
     }
 
     #[repr(C, packed)]
-    #[derive(Debug, FromBytes, AsBytes, Default)]
+    #[derive(FromBytes, AsBytes, Default)]
     struct RawKV6Data {
         x_size: u32,
         y_size: u32,
@@ -40,8 +40,6 @@ mod legacy {
         voxel_count: u32
     }
 
-    // Rust-safe type
-    #[derive(Debug)]
     pub struct KV6Data {
         pub x_size: u32,
         pub y_size: u32,

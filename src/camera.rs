@@ -1,6 +1,7 @@
 use cgmath::prelude::*;
 use cgmath::Vector3;
 use cgmath::Vector4;
+use cgmath::Matrix3;
 use cgmath::Matrix4;
 
 use crate::controls::*;
@@ -12,9 +13,11 @@ pub struct Camera {
     pub position: Vector3<f32>,
     velocity: Vector3<f32>,
 
-    pub forward: Vector3<f32>,
+    /*pub forward: Vector3<f32>,
     pub right: Vector3<f32>,
-    pub up: Vector3<f32>,
+    pub up: Vector3<f32>,*/
+
+    pub orientation: Matrix3<f32>,
 
     mx_delta: f32,
     my_delta: f32,
@@ -36,13 +39,12 @@ impl Camera {
         let right = forward_norm.cross(WORLD_UP);
         let up = right.cross(forward);
 
+        let orientation = Matrix3::from_cols(up, right, forward_norm);
+
         Camera {
             position,
             velocity: Vector3::zero(),
-
-            forward: forward_norm,
-            right,
-            up,
+            orientation: orientation,
 
             mx_delta: 0.0,
             my_delta: 0.0,
@@ -86,12 +88,12 @@ impl Camera {
 
         let mut acceleration = Vector3::zero();
 
-        if self.move_forward  { acceleration += self.forward * TICK_STEP; }
-        if self.move_backward { acceleration -= self.forward * TICK_STEP; }
-        if self.move_left     { acceleration -= self.right * TICK_STEP;   }
-        if self.move_right    { acceleration += self.right * TICK_STEP;   }
-        if self.move_up       { acceleration += self.up * TICK_STEP;      }
-        if self.move_down     { acceleration -= self.up * TICK_STEP;      }
+        if self.move_forward  { acceleration += self.orientation.z * TICK_STEP; }
+        if self.move_backward { acceleration -= self.orientation.z * TICK_STEP; }
+        if self.move_left     { acceleration -= self.orientation.y * TICK_STEP; }
+        if self.move_right    { acceleration += self.orientation.y * TICK_STEP; }
+        if self.move_up       { acceleration += self.orientation.x * TICK_STEP; }
+        if self.move_down     { acceleration -= self.orientation.x * TICK_STEP; }
 
         let norm_accel = acceleration.normalize();
         if  norm_accel.x.is_finite() { // prevent NaNs...
@@ -108,15 +110,13 @@ impl Camera {
         self.position += self.velocity * TICK_STEP * TICK_STEP * MOVEMENT_SPEED;
 
         // Rotation
-        legacy::orthorotate(self.right.z * 0.1,
-            (-self.my_delta * PI / 180.0) * MOUSE_SENSITIVITY / 100.0,
-            ( self.mx_delta * PI / 180.0) * MOUSE_SENSITIVITY / 100.0,
-            &mut self.right, &mut self.up, &mut self.forward);
-
-        /*self.forward = (Vector3::new(0.0, 0.0, 0.0) - self.position).normalize();
-        self.forward = if self.forward.is_finite() { self.forward } else { Vector3::new(1.0, 0.0, 0.0) };
-        self.right = self.forward.cross(Vector3::new(0.0, 0.0, 1.0));
-        self.up = self.right.cross(self.forward);*/
+        self.orientation = self.orientation * legacy::orthorotate(
+            Vector3::new(
+                self.orientation.y.z * 0.1,
+                (-self.mx_delta * PI / 180.0) * MOUSE_SENSITIVITY / 100.0,
+                ( self.my_delta * PI / 180.0) * MOUSE_SENSITIVITY / 100.0
+            )
+        );
 
         self.mx_delta = 0.0;
         self.my_delta = 0.0;
@@ -127,12 +127,12 @@ impl Camera {
         const MOVEMENT_SPEED: f32 = 32.0;
         let translation = self.position + self.velocity * TICK_STEP * TICK_STEP * MOVEMENT_SPEED * delta;
 
-        Matrix4 {
-            x: Vector4::new(self.right.x, self.up.x, -self.forward.x, 0.0),
-            y: Vector4::new(self.right.y, self.up.y, -self.forward.y, 0.0),
-            z: Vector4::new(self.right.z, self.up.z, -self.forward.z, 0.0),
-            w: Vector4::new(0.0, 0.0, 0.0, 1.0)
-        } * Matrix4::from_translation(-translation)
+        Matrix4::new(
+            self.orientation.y.x, self.orientation.x.x, -self.orientation.z.x, 0.0,
+            self.orientation.y.y, self.orientation.x.y, -self.orientation.z.y, 0.0,
+            self.orientation.y.z, self.orientation.x.z, -self.orientation.z.z, 0.0,
+                             0.0,                  0.0,                   0.0, 1.0
+        ) * Matrix4::from_translation(-translation)
     }
 
     pub fn get_perspective_matrix(target: &glium::Frame) -> Matrix4<f32> {
@@ -147,36 +147,15 @@ mod legacy {
     use cgmath::Vector3;
     use cgmath::Matrix3;
 
-    // voxlap convenience function. i probably don't need it, but uh, it's here anyway
-    pub fn orthorotate(mut ox: f32, mut oy: f32, mut oz: f32,
-        ist: &mut Vector3<f32>,
-        ihe: &mut Vector3<f32>,
-        ifo: &mut Vector3<f32>)
+    pub fn orthorotate(rot: Vector3<f32>) -> Matrix3<f32>
     {
-        let mut f: f32; let mut t: f32;
-        let mut rr = Matrix3::new(0.0,0.0,0.0,
-                                  0.0,0.0,0.0, // annoying
-                                  0.0,0.0,0.0);
+        let c = Vector3::new(rot.x.cos(), rot.y.cos(), rot.z.cos());
+        let s = Vector3::new(rot.x.sin(), rot.y.sin(), rot.z.sin());
 
-        let dx = ox.sin(); ox = ox.cos();
-        let dy = oy.sin(); oy = oy.cos();
-        let dz = oz.sin(); oz = oz.cos();
-
-        
-        f = ox*oz; t = dx*dz; rr.x.x =  t*dy + f; rr.z.y = -f*dy - t;
-        f = ox*dz; t = dx*oz; rr.x.y = -f*dy + t; rr.z.x =  t*dy - f;
-        rr.x.z = dz*oy; rr.y.x = -dx*oy; rr.y.y = ox*oy; rr.z.z = oz*oy; rr.y.z = dy;
-        ox = ist.x; oy = ihe.x; oz = ifo.x;
-        ist.x = ox*rr.x.x + oy*rr.y.x + oz*rr.z.x;
-        ihe.x = ox*rr.x.y + oy*rr.y.y + oz*rr.z.y;
-        ifo.x = ox*rr.x.z + oy*rr.y.z + oz*rr.z.z;
-        ox = ist.y; oy = ihe.y; oz = ifo.y;
-        ist.y = ox*rr.x.x + oy*rr.y.x + oz*rr.z.x;
-        ihe.y = ox*rr.x.y + oy*rr.y.y + oz*rr.z.y;
-        ifo.y = ox*rr.x.z + oy*rr.y.z + oz*rr.z.z;
-        ox = ist.z; oy = ihe.z; oz = ifo.z;
-        ist.z = ox*rr.x.x + oy*rr.y.x + oz*rr.z.x;
-        ihe.z = ox*rr.x.y + oy*rr.y.y + oz*rr.z.y;
-        ifo.z = ox*rr.x.z + oy*rr.y.z + oz*rr.z.z;
+        Matrix3::new(
+            s.x*s.z*s.y + c.x*c.z, -c.x*s.z*s.y + s.x*c.z, s.z*c.y,
+                         -s.x*c.y,                c.x*c.y,    s.y,
+            s.x*c.z*s.y - c.x*s.z, -c.x*c.z*s.y - s.x*s.z, c.z*c.y
+        )
     }
 }

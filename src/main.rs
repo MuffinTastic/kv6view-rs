@@ -66,38 +66,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     set_capture(&display, true);
 
-    let viewer = Viewer::init_data(matches, &display)?;
+    let viewer = init_data(matches, &display)?;
     run_loop(viewer, event_loop, display);
     Ok(())
 }
 
-impl Viewer {
-    fn init_data(matches: ArgMatches, display: &Display) -> Result<Viewer, Box<dyn std::error::Error>> {
-        let camera = Camera::new(
-            Vector3::new(32.0, 32.0, 0.0),
-            Vector3::new(-1.0, -1.0, 0.0).normalize()
-        );
+fn init_data(matches: ArgMatches, display: &Display) -> Result<Viewer, Box<dyn std::error::Error>> {
+    let camera = Camera::new(
+        Vector3::new(0.0, 32.0, 0.0),
+        Vector3::new(0.0, -1.0, 0.0).normalize()
+    );
 
-        let program = glium::Program::from_source(display,
-            &shaders::VERTEX_SHADER_SRC,
-            &shaders::FRAGMENT_SHADER_SRC,
-            None)?;
+    let program = glium::Program::from_source(display,
+        &shaders::VERTEX_SHADER_SRC,
+        &shaders::FRAGMENT_SHADER_SRC,
+        None)?;
 
-        let light_kv6 = kv6::KV6Model::from_file("kv6/light.kv6", display)?;
-        let user_kv6 = kv6::KV6Model::from_file(matches.value_of("file").unwrap(), display)?;
+    let light_kv6 = kv6::KV6Model::from_file("kv6/light.kv6", display)?;
+    let user_kv6 = kv6::KV6Model::from_file(matches.value_of("file").unwrap(), display)?;
 
-        Ok(Viewer {
-            focused: true,
+    Ok(Viewer {
+        focused: true,
 
-            camera,
+        camera,
 
-            program,
-            light_dir: (Vector3::new(0.0, 0.0, 0.0) - Vector3::new(-128.0, -128.0, 64.0)).normalize(),
-            light_kv6,
-            show_light: true,
-            user_kv6
-        })
-    }
+        program,
+        light_dir: (Vector3::new(0.0, 0.0, 0.0) - Vector3::new(-128.0, -128.0, 64.0)).normalize(),
+        light_kv6,
+        show_light: true,
+        user_kv6
+    })
 }
 
 fn run_loop(mut viewer: Viewer, event_loop: EventLoop<()>, display: Display) {
@@ -116,35 +114,7 @@ fn run_loop(mut viewer: Viewer, event_loop: EventLoop<()>, display: Display) {
         prev_time = Instant::now();
 
         for event in events {
-            match event {
-                Event::WindowEvent { event, ..} => match event {
-                    WindowEvent::CloseRequested =>
-                        action = eventutil::LoopAction::Stop,
-                    WindowEvent::Focused(focus) => {
-                        viewer.focused = *focus;
-                        set_capture(&display, *focus);
-                    },
-                    WindowEvent::KeyboardInput { input, .. } => if viewer.focused {
-                        viewer.camera.handle_keyboard(input);
-
-                        let pressed = input.state == ElementState::Pressed;
-                        match input.virtual_keycode {
-                            Some(controls::KEY_EXIT) => if pressed { action = eventutil::LoopAction::Stop; },
-                            Some(controls::KEY_MOVE_LIGHT) => if pressed { viewer.light_dir = -viewer.camera.forward; },
-                            Some(controls::KEY_SHOW_LIGHT) => if pressed { viewer.show_light = !viewer.show_light; },
-                            _ => (),
-                        }
-                    },
-                    _ => (),
-                },
-                Event::DeviceEvent { event, .. } => match event {
-                    DeviceEvent::MouseMotion { delta } => if viewer.focused {
-                        viewer.camera.handle_mouse(delta.0 as f32, delta.1 as f32)
-                    },
-                    _ => ()
-                }
-                _ => (),
-            }
+            handle_event(&mut viewer, event, &display, &mut action);
         }
 
         while lag >= MS_PER_UPDATE {
@@ -164,6 +134,38 @@ fn run_loop(mut viewer: Viewer, event_loop: EventLoop<()>, display: Display) {
 
         return action;
     });
+}
+
+fn handle_event(viewer: &mut Viewer, event: &Event<()>, display: &Display, action: &mut eventutil::LoopAction) {
+    match event {
+        Event::WindowEvent { event, ..} => match event {
+            WindowEvent::CloseRequested =>
+                *action = eventutil::LoopAction::Stop,
+            WindowEvent::Focused(focus) => {
+                viewer.focused = *focus;
+                set_capture(&display, *focus);
+            },
+            WindowEvent::KeyboardInput { input, .. } => if viewer.focused {
+                viewer.camera.handle_keyboard(input);
+
+                let pressed = input.state == ElementState::Pressed;
+                match input.virtual_keycode {
+                    Some(controls::KEY_EXIT) => if pressed { *action = eventutil::LoopAction::Stop; },
+                    Some(controls::KEY_MOVE_LIGHT) => if pressed { viewer.light_dir = -viewer.camera.orientation.z; },
+                    Some(controls::KEY_SHOW_LIGHT) => if pressed { viewer.show_light = !viewer.show_light; },
+                    _ => (),
+                }
+            },
+            _ => (),
+        },
+        Event::DeviceEvent { event, .. } => match event {
+            DeviceEvent::MouseMotion { delta } => if viewer.focused {
+                viewer.camera.handle_mouse(delta.0 as f32, delta.1 as f32)
+            },
+            _ => ()
+        }
+        _ => (),
+    }
 }
 
 // stub, but possibly useful in the future
