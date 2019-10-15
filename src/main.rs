@@ -37,10 +37,13 @@ struct Viewer {
     camera: Camera,
     
     program: glium::Program,
+
     light_dir: Vector3<f32>,
     light_kv6: kv6::KV6Model,
     show_light: bool,
-    user_kv6: kv6::KV6Model
+    
+    user_kv6: kv6::KV6Model,
+    aos_team_color: Vector3<f32>
 }
 
 fn set_capture(display: &Display, capture: bool) {
@@ -55,6 +58,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg(Arg::with_name("file")
             .required(true)
             .index(1))
+        .arg(Arg::with_name("aos-team-color")
+            .long("aos-team")
+            .help("Replace voxels colored 0,0,0 with this color.")
+            .number_of_values(3)
+            .required(false))
         .get_matches();
 
     let event_loop = EventLoop::new();
@@ -77,12 +85,22 @@ fn init_data(matches: ArgMatches, display: &Display) -> Result<Viewer, Box<dyn s
         Vector3::new(0.0, -1.0, 0.0).normalize()
     );
 
+    let mut aos_team_color = Vector3::new(0.0, 0.0, 0.0);
+    if let Some(color_string) = matches.values_of("aos-team-color") {
+        let values_str: Vec<&str> = color_string.collect();
+        let values = values_str.iter().map(|s| s.parse::<u8>().map(|i| i as f32))
+            .collect::<Result<Vec<f32>, std::num::ParseIntError>>()?;
+        // guaranteed to be 3 elements by Arg match
+        aos_team_color = Vector3::new(values[0], values[1], values[2]);
+    }
+
     let program = glium::Program::from_source(display,
         &shaders::VERTEX_SHADER_SRC,
         &shaders::FRAGMENT_SHADER_SRC,
         None)?;
 
     let light_kv6 = kv6::KV6Model::from_file("kv6/light.kv6", display)?;
+    // file match guaranteed (required), unwrap
     let user_kv6 = kv6::KV6Model::from_file(matches.value_of("file").unwrap(), display)?;
 
     Ok(Viewer {
@@ -94,7 +112,9 @@ fn init_data(matches: ArgMatches, display: &Display) -> Result<Viewer, Box<dyn s
         light_dir: (Vector3::new(0.0, 0.0, 0.0) - Vector3::new(-128.0, -128.0, 64.0)).normalize(),
         light_kv6,
         show_light: true,
-        user_kv6
+
+        user_kv6,
+        aos_team_color
     })
 }
 
@@ -192,9 +212,10 @@ fn render(viewer: &mut Viewer, display: &Display, delta: f32) {
     let view: [[f32; 4]; 4] = viewer.camera.get_view_matrix(delta).into();
     let model: [[f32; 4]; 4] = Matrix4::from_value(1.0).into(); // identity
     let light_dir: [f32; 3] = viewer.light_dir.into();
+    let aos_team_color: [f32; 3] = viewer.aos_team_color.into();
 
     target.draw(&viewer.user_kv6.vertex_buffer, &viewer.user_kv6.indices, &viewer.program,
-        &uniform! { perspective: perspective, view: view, model: model, light_dir: light_dir },
+        &uniform! { perspective: perspective, view: view, model: model, light_dir: light_dir, aos_team_color: aos_team_color },
         &params).unwrap();
 
     if viewer.show_light {
@@ -202,7 +223,7 @@ fn render(viewer: &mut Viewer, display: &Display, delta: f32) {
         let light_dir: [f32; 3] = (-viewer.light_dir).into(); // so that it's lit on the side facing the user's kv6
 
         target.draw(&viewer.light_kv6.vertex_buffer, &viewer.light_kv6.indices, &viewer.program,
-            &uniform! { perspective: perspective, view: view, model: model, light_dir: light_dir },
+            &uniform! { perspective: perspective, view: view, model: model, light_dir: light_dir, aos_team_color: aos_team_color },
             &params).unwrap();
     }
 
