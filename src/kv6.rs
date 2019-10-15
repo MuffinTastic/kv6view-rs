@@ -104,7 +104,7 @@ mod legacy {
             let mut vec = Vector3::new(0.0, 0.0, i as f32 * ZMULK + ZADDK);
             let g = i as f32 * (GOLDRAT * PI * 2.0);
             let r = (1.0 - vec.z * vec.z).sqrt();
-            vec.x = g.cos()*r;
+            vec.x = -g.cos()*r; // flip X for compat
             vec.y = g.sin()*r;
             vec.z *= -1.0;
             vec
@@ -131,7 +131,7 @@ mod legacy {
     const TOP_VISIBLE: u8 = 16;
     const BOTTOM_VISIBLE: u8 = 32;
 
-    pub fn kv6_get_vertices(data: &KV6Data) -> Vec<KV6Vertex> {
+    pub fn kv6_gen_vertices(data: &KV6Data) -> Vec<KV6Vertex> {
         let mut vertices = Vec::new();
         let normal_table = create_normal_table();
 
@@ -143,9 +143,9 @@ mod legacy {
                     let z = voxel.z;
 
                     let vox_pos = Vector3::new(
-                        x as f32 - data.x_piv,
-                        y as f32 - data.y_piv,   // set center of the model to the pivot
-                        -(z as f32) - data.z_piv // and flip model voxels for compatibility with worldspace
+                        -(x as f32) - -data.x_piv,   // set center of the model to the pivot
+                        y as f32 - data.y_piv,      // and flip model axes for compatibility with worldspace
+                        -(z as f32) - data.z_piv 
                     );
 
                     // TODO: find a way to simplify/automate this process more by generating vertices?
@@ -202,20 +202,20 @@ mod legacy {
                     }
 
                     if voxel.visibility & RIGHT_VISIBLE > 0 {
-                        emit_face( [1.0, 0.0, 0.0],
-                            Vector3::new( 0.5, -0.5, -0.5),
-                            Vector3::new( 0.5,  0.5, -0.5),
-                            Vector3::new( 0.5,  0.5,  0.5),
-                            Vector3::new( 0.5, -0.5,  0.5)
-                        );
-                    }
-
-                    if voxel.visibility & LEFT_VISIBLE > 0 {
                         emit_face( [-1.0, 0.0, 0.0],
                             Vector3::new(-0.5, -0.5, -0.5),
                             Vector3::new(-0.5, -0.5,  0.5),
                             Vector3::new(-0.5,  0.5,  0.5),
                             Vector3::new(-0.5,  0.5, -0.5)
+                        );
+                    }
+
+                    if voxel.visibility & LEFT_VISIBLE > 0 {
+                        emit_face( [1.0, 0.0, 0.0],
+                            Vector3::new( 0.5, -0.5, -0.5),
+                            Vector3::new( 0.5,  0.5, -0.5),
+                            Vector3::new( 0.5,  0.5,  0.5),
+                            Vector3::new( 0.5, -0.5,  0.5)
                         );
                     }
 
@@ -235,7 +235,7 @@ pub struct KV6Model {
 
 impl KV6Model {
     pub fn from_data(data: legacy::KV6Data, display: &glium::Display) -> KV6Model {
-        let vertices = legacy::kv6_get_vertices(&data);
+        let vertices = legacy::kv6_gen_vertices(&data);
 
         KV6Model {
             vertex_buffer: glium::VertexBuffer::new(&*display, &vertices).unwrap(),
