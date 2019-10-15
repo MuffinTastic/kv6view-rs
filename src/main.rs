@@ -31,10 +31,10 @@ struct Viewer {
     program: glium::Program,
 
     light_dir: Vector3<f32>,
-    light_kv6: kv6::KV6Model,
+    light_kv6: kv6::KV6Mesh,
     show_light: bool,
     
-    user_kv6: kv6::KV6Model,
+    user_kv6: kv6::KV6Mesh,
     aos_team_color: Vector3<f32>
 }
 
@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     center_window(&display);
     display.gl_window().window().set_visible(true);
-    
+
     set_capture(&display, true);
 
     let viewer = init_data(matches, &display)?;
@@ -92,9 +92,8 @@ fn init_data(matches: ArgMatches, display: &Display) -> Result<Viewer, Box<dyn s
 
     let mut aos_team_color = Vector3::new(0.0, 0.0, 0.0);
     if let Some(color_string) = matches.values_of("aos-team-color") {
-        let values_str: Vec<&str> = color_string.collect();
-        let values = values_str.iter().map(|s| s.parse::<u8>().map(|i| i as f32))
-            .collect::<Result<Vec<f32>, std::num::ParseIntError>>()?;
+        let values = color_string.map(|s| s.parse::<u8>().map(|i| i as f32))
+            .collect::<Result<Vec<f32>, _>>()?;
         // guaranteed to be 3 elements by Arg match
         aos_team_color = Vector3::new(values[0], values[1], values[2]);
     }
@@ -104,9 +103,9 @@ fn init_data(matches: ArgMatches, display: &Display) -> Result<Viewer, Box<dyn s
         &shaders::FRAGMENT_SHADER_SRC,
         None)?;
 
-    let light_kv6 = kv6::KV6Model::from_file("kv6/light.kv6", display)?;
+    let light_kv6 = kv6::KV6Mesh::from_file("kv6/light.kv6", display)?;
     // file match guaranteed (required), unwrap
-    let user_kv6 = kv6::KV6Model::from_file(matches.value_of("file").unwrap(), display)?;
+    let user_kv6 = kv6::KV6Mesh::from_file(matches.value_of("file").unwrap(), display)?;
 
     Ok(Viewer {
         focused: true,
